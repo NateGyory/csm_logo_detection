@@ -4,6 +4,7 @@ import os
 import sys
 import torch
 import torchvision
+import csv
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.detection import FasterRCNN
 from torch.utils.data import DataLoader, Dataset
@@ -20,59 +21,34 @@ def load_images_and_labels(image_folder):
             images_dict[filename] = img
 
     # Load labels
-    f = open(os.path.join(image_folder,'labels.txt'), 'r')
-    lines = f.readlines()
-    for line in lines:
-        line_arr = line.split()
-        label_dict[line_arr[0]] = line_arr[1:]
+    with open(os.path.join(image_folder,'labels.csv')) as f:
+        reader = csv.reader(f)
+        for row in reader:
+            x = int(row[1])
+            y = int(row[2])
+            w = int(row[3])
+            h = int(row[4])
+            box = [x, y, x+w, y+h]
+            label_dict[row[0]] = box
 
     return images_dict, label_dict
 
 def process_images(image_folder):
-    label_dict = {}
     images_dict, label_dict = load_images_and_labels(image_folder)
     images = []
     annotations = []
 
     for file_name, img in images_dict.items():
-        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray_img,(5,5),0)
-        thr = cv2.adaptiveThreshold(gray_img,255,cv2.ADAPTIVE_THRESH_MEAN_C,\
-                cv2.THRESH_BINARY,11,2)
-        binary_img = cv2.bitwise_not(thr)
+        # Conver cv2 to PIL image
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img_pil = Image.fromarray(img)
 
-        # Opening and Closing morphology to remove noise
-        ksize = 5
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
-        binary_img = cv2.morphologyEx(binary_img, cv2.MORPH_OPEN, kernel)
-        binary_img = cv2.morphologyEx(binary_img, cv2.MORPH_CLOSE, kernel)
-
-        cnts = cv2.findContours(binary_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        cnts = cnts[0] if len(cnts) == 2 else cnts[1]
-        for c in cnts:
-            x,y,w,h = cv2.boundingRect(c)
-            x_phone = float(label_dict[file_name][0]) * img.shape[1]
-            y_phone = float(label_dict[file_name][1]) * img.shape[0]
-
-            # Determine if x,y is close enough to label x,y
-            thresh = 7
-            if abs(x_phone - (x + w/2)) < thresh and abs(y_phone - (y + h/2)) < thresh:
-                dim_scalar = 14
-                coord_scalar = 7
-                w = dim_scalar + w
-                h = dim_scalar + h
-                x = x - coord_scalar
-                y = y - coord_scalar
-
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-                img_pil = Image.fromarray(img)
-                images.append(img_pil)
-                annotations.append([x, y, x+w, y+h])
+        images.append(img_pil)
+        annotations.append(label_dict[file_name])
 
     return images, annotations
 
-class IphoneDataset(Dataset):
+class LogoDataset(Dataset):
     def __init__(self, image_folder):
         self.imgs, self.annotations = process_images(image_folder)
 
@@ -82,11 +58,12 @@ class IphoneDataset(Dataset):
 
         boxes = torch.tensor([annotation], dtype=torch.float32)
 
-        # Two labels: Iphone and background
+        # Two labels: CSM Logo and background
         num_objs = 2
         labels = torch.ones((num_objs,), dtype=torch.int64)
         image_id = torch.tensor([idx])
         area = (boxes[:, 3] - boxes[:, 1]) * (boxes[:, 2] - boxes[:, 0])
+
 
         # No crowds
         iscrowd = torch.zeros((num_objs,), dtype=torch.int64)
@@ -121,8 +98,8 @@ def train_model():
     image_folder = sys.argv[1]
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-    # Load custom Iphone dataset
-    dataset = IphoneDataset(image_folder)
+    # Load custom Logo dataset
+    dataset = LogoDataset(image_folder)
 
     data_loader = DataLoader(
         dataset,
@@ -156,6 +133,7 @@ def train_model():
 
             losses = sum(loss for loss in loss_dict.values())
             loss_value = losses.item()
+            print(f"Iterations #{itr} loss: {loss_value}")
 
             optimizer.zero_grad()
             losses.backward()
@@ -168,12 +146,12 @@ def train_model():
             lr_scheduler.step()
         print(f"Epoch #{epoch} loss: {loss_value}")
 
-    torch.save(model.state_dict(), './model.pth')
+    torch.save(model.state_dict(), '../model/model.pth')
     torch.save({
         'epoch': epoch,
         'model_state_dict': model.state_dict(),
         'optimizer_state_dict' : optimizer.state_dict(),
-    },  './ckpt.pth')
+    },  '../model/ckpt.pth')
 
 ##########
 #  Main  #
