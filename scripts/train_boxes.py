@@ -21,14 +21,18 @@ def load_images_and_labels(image_folder):
             images_dict[filename] = img
 
     # Load labels
-    with open(os.path.join(image_folder,'labels.csv')) as f:
+    with open(os.path.join(image_folder,'_annotations.csv')) as f:
         reader = csv.reader(f)
+        flag = 1
         for row in reader:
-            x = int(row[1])
-            y = int(row[2])
-            w = int(row[3])
-            h = int(row[4])
-            box = [x, y, x+w, y+h]
+            if flag:
+                flag = 0
+                continue
+            x_min = int(row[4])
+            y_min = int(row[5])
+            x_max = int(row[6])
+            y_max = int(row[7])
+            box = [x_min, y_min, x_max, y_max]
             label_dict[row[0]] = box
 
     return images_dict, label_dict
@@ -125,7 +129,7 @@ def train_model():
     optimizer = torch.optim.SGD(params, lr=0.005, momentum=0.9, weight_decay=0.0005)
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.1)
 
-    num_epochs = 10
+    num_epochs = 5
 
     itr = 1
 
